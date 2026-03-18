@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+            suffix: darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            suffix: darwin-arm64
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          go build -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "argus-${{ matrix.suffix }}" ./cmd/argus/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: argus-${{ matrix.suffix }}
+          path: argus-${{ matrix.suffix }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-version:refname | sed -n '2p')
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="${PREV_TAG}..HEAD"
+          fi
+          {
+            echo "changelog<<EOF"
+            git log "$RANGE" --pretty=format:"- %s" --no-merges
+            echo ""
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+          CHANGELOG: ${{ steps.changelog.outputs.changelog }}
+        run: |
+          gh release create "$VERSION" dist/argus-* \
+            --title "Argus $VERSION" \
+            --notes "## What Changed
+
+          ${CHANGELOG}
+
+          ## Install
+
+          Download the binary for your platform, then:
+
+          \`\`\`bash
+          # macOS Apple Silicon
+          chmod +x argus-darwin-arm64 && sudo mv argus-darwin-arm64 /usr/local/bin/argus
+
+          # macOS Intel
+          chmod +x argus-darwin-amd64 && sudo mv argus-darwin-amd64 /usr/local/bin/argus
+
+          # Linux x86_64
+          chmod +x argus-linux-amd64 && sudo mv argus-linux-amd64 /usr/local/bin/argus
+          \`\`\`
+
+          Then: \`argus start && argus status\`
+
+          No runtime required. Single binary, zero dependencies."
