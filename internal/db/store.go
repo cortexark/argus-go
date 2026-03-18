@@ -129,11 +129,26 @@ func (s *Store) InsertInjectionAlert(a InjectionAlert) error {
 
 // ─── Query methods ───────────────────────────────────────────────────────────
 
-// GetRecentFileAlerts returns the most recent file access events.
-func (s *Store) GetRecentFileAlerts(limit int) ([]FileAccessEvent, error) {
-	rows, err := s.db.Query(
-		`SELECT pid,process_name,file_path,sensitivity,timestamp
-         FROM file_access_events ORDER BY timestamp DESC LIMIT ?`, limit)
+// GetRecentFileAlerts returns file access events since `since`, newest first.
+// Pass zero time to get all recent events up to limit.
+func (s *Store) GetRecentFileAlerts(since time.Time, limit int) ([]FileAccessEvent, error) {
+	var rows interface {
+		Next() bool
+		Scan(...any) error
+		Close() error
+	}
+	var err error
+	if since.IsZero() {
+		rows, err = s.db.Query(
+			`SELECT pid,process_name,file_path,sensitivity,timestamp
+             FROM file_access_events ORDER BY timestamp DESC LIMIT ?`, limit)
+	} else {
+		rows, err = s.db.Query(
+			`SELECT pid,process_name,file_path,sensitivity,timestamp
+             FROM file_access_events WHERE timestamp >= ?
+             ORDER BY timestamp DESC LIMIT ?`,
+			since.UTC().Format(time.RFC3339), limit)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +167,7 @@ func (s *Store) GetRecentFileAlerts(limit int) ([]FileAccessEvent, error) {
 	return events, nil
 }
 
-// GetRecentNetworkEvents returns recent network connection events.
+// GetRecentNetworkEvents returns recent network connection events since `since`.
 func (s *Store) GetRecentNetworkEvents(limit int) ([]NetworkEvent, error) {
 	rows, err := s.db.Query(
 		`SELECT pid,process_name,protocol,local_port,remote_addr,remote_port,endpoint,label,state,timestamp
@@ -206,7 +221,7 @@ func (s *Store) GetDailySummary(date time.Time) (*DailySummary, error) {
 		}
 	}
 
-	// File alerts
+	// File alerts for the day
 	fileRows, err := s.db.Query(
 		`SELECT pid,process_name,file_path,sensitivity,timestamp
          FROM file_access_events WHERE timestamp BETWEEN ? AND ?

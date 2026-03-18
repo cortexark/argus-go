@@ -73,14 +73,14 @@ func (g *Generator) PrintDailySummary(date time.Time) {
 		fmt.Println(strings.Repeat("─", 60))
 
 		for _, f := range summary.FileAlerts {
-			sensitivity := f.Sensitivity
-			switch sensitivity {
+			ts := f.Timestamp.Local().Format("15:04:05")
+			switch f.Sensitivity {
 			case "credentials":
-				red.Printf("  [!] %s  →  %s  (%s)\n", f.ProcessName, f.FilePath, sensitivity)
+				red.Printf("  [%s] CRED     %s  →  %s\n", ts, f.ProcessName, f.FilePath)
 			case "browserData":
-				yellow.Printf("  [!] %s  →  %s  (%s)\n", f.ProcessName, f.FilePath, sensitivity)
+				yellow.Printf("  [%s] BROWSER  %s  →  %s\n", ts, f.ProcessName, f.FilePath)
 			default:
-				fmt.Printf("  [*] %s  →  %s  (%s)\n", f.ProcessName, f.FilePath, sensitivity)
+				fmt.Printf("  [%s] %-8s %s  →  %s\n", ts, strings.ToUpper(f.Sensitivity), f.ProcessName, f.FilePath)
 			}
 		}
 	}
@@ -92,12 +92,13 @@ func (g *Generator) PrintDailySummary(date time.Time) {
 		fmt.Println(strings.Repeat("─", 60))
 
 		for _, n := range summary.NetworkEvents {
-			label := n.Label
-			if label == "" {
-				label = n.RemoteAddr
+			ts := n.Timestamp.Local().Format("15:04:05")
+			endpoint := n.Label
+			if endpoint == "" {
+				endpoint = n.RemoteAddr
 			}
-			fmt.Printf("  %s  →  %s:%d  [%s]\n",
-				n.ProcessName, label, n.RemotePort, n.Protocol)
+			fmt.Printf("  [%s] %s  →  %s:%d  [%s]\n",
+				ts, n.ProcessName, endpoint, n.RemotePort, n.Protocol)
 		}
 	}
 
@@ -122,29 +123,41 @@ func (g *Generator) PrintDailySummary(date time.Time) {
 }
 
 // PrintLiveFeed prints the most recent events in a live-feed style.
-func (g *Generator) PrintLiveFeed(limit int) {
-	alerts, err := g.store.GetRecentFileAlerts(limit)
+// Pass zero since to get recent regardless of time; non-zero filters to that window.
+func (g *Generator) PrintLiveFeed(since time.Time, limit int) {
+	alerts, err := g.store.GetRecentFileAlerts(since, limit)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return
 	}
 
-	bold.Println("\n=== ARGUS LIVE FEED ===\n")
+	label := "RECENT ACTIVITY"
+	if !since.IsZero() {
+		mins := int(time.Since(since).Minutes())
+		if mins < 60 {
+			label = fmt.Sprintf("LAST %d MINUTES", mins)
+		} else {
+			label = fmt.Sprintf("LAST %d HOURS", int(time.Since(since).Hours()))
+		}
+	}
+
+	bold.Printf("\n=== ARGUS — %s ===\n\n", label)
 
 	if len(alerts) == 0 {
-		green.Println("  No alerts in recent activity.")
+		green.Println("  No file access alerts in this period.")
+		fmt.Println()
 		return
 	}
 
 	for _, a := range alerts {
-		ts := a.Timestamp.Format("15:04:05")
+		ts := a.Timestamp.Local().Format("2006-01-02 15:04:05")
 		switch a.Sensitivity {
 		case "credentials":
-			red.Printf("[%s] CRED  %s accessed %s\n", ts, a.ProcessName, a.FilePath)
+			red.Printf("[%s] CRED     %s  →  %s\n", ts, a.ProcessName, a.FilePath)
 		case "browserData":
-			yellow.Printf("[%s] BROWSER  %s accessed %s\n", ts, a.ProcessName, a.FilePath)
+			yellow.Printf("[%s] BROWSER  %s  →  %s\n", ts, a.ProcessName, a.FilePath)
 		default:
-			fmt.Printf("[%s] FILE  %s accessed %s (%s)\n", ts, a.ProcessName, a.FilePath, a.Sensitivity)
+			fmt.Printf("[%s] %-8s %s  →  %s\n", ts, strings.ToUpper(a.Sensitivity), a.ProcessName, a.FilePath)
 		}
 	}
 	fmt.Println()

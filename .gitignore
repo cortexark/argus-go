@@ -1,4 +1,9 @@
-argus
-argus-*
+# Compiled binaries (in root or dist/)
+/argus
+/argus-*
+/dist/argus
+/dist/argus-*
+
+# Database and logs
 *.db
 *.log

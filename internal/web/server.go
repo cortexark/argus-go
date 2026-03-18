@@ -76,7 +76,7 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
-	alerts, err := s.store.GetRecentFileAlerts(50)
+	alerts, err := s.store.GetRecentFileAlerts(time.Time{}, 50)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
